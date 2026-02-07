@@ -6,35 +6,12 @@ import db from "../database";
 import { projectTable, taskTable, userTable } from "../database/schema";
 import { publishEvent, subscribeToEvent } from "../events";
 import { activitySchema } from "../schemas";
-import { getAgentHandles, notifyAgentMention } from "../utils/openclaw";
 import { workspaceAccess } from "../utils/workspace-access-middleware";
 import createActivity from "./controllers/create-activity";
 import createComment from "./controllers/create-comment";
 import deleteComment from "./controllers/delete-comment";
 import getActivities from "./controllers/get-activities";
 import updateComment from "./controllers/update-comment";
-
-function extractMentionHandles(markdown: string): string[] {
-  const handles = new Set<string>();
-
-  // BlockNote mentions are stored as markdown links: [@smoke](mention:smoke)
-  // Capture both the href and any raw @handle typing.
-  const mentionHrefRe = /\bmention:([a-z0-9][a-z0-9_-]{0,31})\b/gi;
-  for (;;) {
-    const match = mentionHrefRe.exec(markdown);
-    if (!match) break;
-    if (match[1]) handles.add(match[1].toLowerCase());
-  }
-
-  const atRe = /(?:^|[^a-z0-9_])@([a-z0-9][a-z0-9_-]{0,31})\b/gi;
-  for (;;) {
-    const match = atRe.exec(markdown);
-    if (!match) break;
-    if (match[1]) handles.add(match[1].toLowerCase());
-  }
-
-  return Array.from(handles);
-}
 
 const activity = new Hono<{
   Variables: {
@@ -150,30 +127,7 @@ const activity = new Hono<{
           projectId: task.projectId,
         });
 
-        const handles = getAgentHandles(extractMentionHandles(comment));
-        if (handles.length > 0) {
-          const authorName = user?.name ?? userId;
-
-          void Promise.allSettled(
-            handles.map((handle) =>
-              notifyAgentMention({
-                handle,
-                taskId,
-                taskTitle: task.title,
-                taskNumber: task.number,
-                projectName: task.projectName,
-                authorName,
-                comment,
-              }),
-            ),
-          ).then((results) => {
-            for (const r of results) {
-              if (r.status === "rejected") {
-                console.error("[openclaw] mention delivery failed:", r.reason);
-              }
-            }
-          });
-        }
+        // OpenClaw @mention routing is handled by the OpenClaw plugin (plugins/openclaw).
       }
 
       return c.json(newComment);
