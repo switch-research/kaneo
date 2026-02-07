@@ -1,11 +1,13 @@
 import { createId } from "@paralleldrive/cuid2";
 import {
+  bigint,
   boolean,
   index,
   integer,
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const userTable = pgTable("user", {
@@ -430,5 +432,76 @@ export const apikeyTable = pgTable(
   (table) => [
     index("apikey_key_idx").on(table.key),
     index("apikey_userId_idx").on(table.userId),
+  ],
+);
+
+// --- OpenClaw agent layer (The Void) ---
+
+export const openclawTaskThreadTable = pgTable(
+  "openclaw_task_thread",
+  {
+    id: text("id")
+      .$defaultFn(() => createId())
+      .primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => taskTable.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    // Mention handle / agent identifier (e.g. "smoke", "shade").
+    handle: text("handle").notNull(),
+    // Canonical OpenClaw session key (deterministic per task).
+    sessionKey: text("session_key").notNull(),
+    // Watermark (ms) for sessions_history polling.
+    watermarkTs: bigint("watermark_ts", { mode: "number" })
+      .default(0)
+      .notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { mode: "date" })
+      .defaultNow()
+      .$onUpdate(() => new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("openclaw_task_thread_taskId_idx").on(table.taskId),
+    index("openclaw_task_thread_handle_idx").on(table.handle),
+    uniqueIndex("openclaw_task_thread_task_handle_unq").on(
+      table.taskId,
+      table.handle,
+    ),
+  ],
+);
+
+export const openclawIngestLedgerTable = pgTable(
+  "openclaw_ingest_ledger",
+  {
+    id: text("id")
+      .$defaultFn(() => createId())
+      .primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => taskTable.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    handle: text("handle").notNull(),
+    sessionKey: text("session_key").notNull(),
+    messageTs: bigint("message_ts", { mode: "number" }).notNull(),
+    markerType: text("marker_type").notNull(),
+    markerIndex: integer("marker_index").default(0).notNull(),
+    markerHash: text("marker_hash"),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("openclaw_ingest_taskId_idx").on(table.taskId),
+    index("openclaw_ingest_handle_idx").on(table.handle),
+    uniqueIndex("openclaw_ingest_unique_unq").on(
+      table.taskId,
+      table.handle,
+      table.messageTs,
+      table.markerType,
+      table.markerIndex,
+    ),
   ],
 );

@@ -9,6 +9,8 @@ import {
   invitationTable,
   labelTable,
   notificationTable,
+  openclawIngestLedgerTable,
+  openclawTaskThreadTable,
   projectTable,
   sessionTable,
   taskTable,
@@ -104,6 +106,8 @@ export const taskTableRelations = relations(taskTable, ({ one, many }) => ({
   activities: many(activityTable),
   labels: many(labelTable),
   externalLinks: many(externalLinkTable),
+  openclawThreads: many(openclawTaskThreadTable),
+  openclawIngestLedger: many(openclawIngestLedgerTable),
 }));
 
 export const timeEntryTableRelations = relations(timeEntryTable, ({ one }) => ({
@@ -219,6 +223,26 @@ export const externalLinkTableRelations = relations(
     integration: one(integrationTable, {
       fields: [externalLinkTable.integrationId],
       references: [integrationTable.id],
+    }),
+  }),
+);
+
+export const openclawTaskThreadTableRelations = relations(
+  openclawTaskThreadTable,
+  ({ one }) => ({
+    task: one(taskTable, {
+      fields: [openclawTaskThreadTable.taskId],
+      references: [taskTable.id],
+    }),
+  }),
+);
+
+export const openclawIngestLedgerTableRelations = relations(
+  openclawIngestLedgerTable,
+  ({ one }) => ({
+    task: one(taskTable, {
+      fields: [openclawIngestLedgerTable.taskId],
+      references: [taskTable.id],
     }),
   }),
 );
