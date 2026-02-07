@@ -3,15 +3,38 @@ import { Hono } from "hono";
 import { describeRoute, resolver, validator } from "hono-openapi";
 import * as v from "valibot";
 import db from "../database";
-import { taskTable, userTable } from "../database/schema";
+import { projectTable, taskTable, userTable } from "../database/schema";
 import { publishEvent, subscribeToEvent } from "../events";
 import { activitySchema } from "../schemas";
+import { getAgentHandles, notifyAgentMention } from "../utils/openclaw";
 import { workspaceAccess } from "../utils/workspace-access-middleware";
 import createActivity from "./controllers/create-activity";
 import createComment from "./controllers/create-comment";
 import deleteComment from "./controllers/delete-comment";
 import getActivities from "./controllers/get-activities";
 import updateComment from "./controllers/update-comment";
+
+function extractMentionHandles(markdown: string): string[] {
+  const handles = new Set<string>();
+
+  // BlockNote mentions are stored as markdown links: [@smoke](mention:smoke)
+  // Capture both the href and any raw @handle typing.
+  const mentionHrefRe = /\bmention:([a-z0-9][a-z0-9_-]{0,31})\b/gi;
+  for (;;) {
+    const match = mentionHrefRe.exec(markdown);
+    if (!match) break;
+    if (match[1]) handles.add(match[1].toLowerCase());
+  }
+
+  const atRe = /(?:^|[^a-z0-9_])@([a-z0-9][a-z0-9_-]{0,31})\b/gi;
+  for (;;) {
+    const match = atRe.exec(markdown);
+    if (!match) break;
+    if (match[1]) handles.add(match[1].toLowerCase());
+  }
+
+  return Array.from(handles);
+}
 
 const activity = new Hono<{
   Variables: {
@@ -106,8 +129,14 @@ const activity = new Hono<{
         .where(eq(userTable.id, userId));
 
       const [task] = await db
-        .select({ projectId: taskTable.projectId })
+        .select({
+          projectId: taskTable.projectId,
+          title: taskTable.title,
+          number: taskTable.number,
+          projectName: projectTable.name,
+        })
         .from(taskTable)
+        .innerJoin(projectTable, eq(taskTable.projectId, projectTable.id))
         .where(eq(taskTable.id, taskId));
 
       if (task) {
@@ -115,8 +144,36 @@ const activity = new Hono<{
           taskId,
           userId,
           comment: `"${user?.name}" commented: ${comment}`,
+          // For richer consumers (eg OpenClaw), keep the raw markdown too.
+          rawComment: comment,
+          authorName: user?.name ?? null,
           projectId: task.projectId,
         });
+
+        const handles = getAgentHandles(extractMentionHandles(comment));
+        if (handles.length > 0) {
+          const authorName = user?.name ?? userId;
+
+          void Promise.allSettled(
+            handles.map((handle) =>
+              notifyAgentMention({
+                handle,
+                taskId,
+                taskTitle: task.title,
+                taskNumber: task.number,
+                projectName: task.projectName,
+                authorName,
+                comment,
+              }),
+            ),
+          ).then((results) => {
+            for (const r of results) {
+              if (r.status === "rejected") {
+                console.error("[openclaw] mention delivery failed:", r.reason);
+              }
+            }
+          });
+        }
       }
 
       return c.json(newComment);
